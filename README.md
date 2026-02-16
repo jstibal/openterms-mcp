@@ -1,266 +1,190 @@
-"""
-Openterms MCP Server
-====================
+# openterms-mcp
 
-An MCP (Model Context Protocol) server that exposes Openterms receipt
-issuance and verification as tools for any MCP-compatible AI agent.
+When your AI agent calls an API on your behalf, where's the proof it agreed to the terms?
 
-Compatible with: Claude Desktop, Cursor, Windsurf, any MCP client.
+**Openterms issues Ed25519-signed receipts before your agent takes action.** Cryptographic proof of consent — independently verifiable by anyone, forever.
 
-Setup:
-  1. pip install mcp httpx
-  2. Set OPENTERMS_API_URL and OPENTERMS_API_KEY environment variables
-  3. Add to your MCP client config (see README)
+## What it does
 
-What agents can do with this:
-  - issue_receipt: Create a signed terms receipt before taking an action
-  - verify_receipt: Verify any receipt's cryptographic integrity
-  - check_balance: Check workspace balance before issuing
-  - get_pricing: Discover current receipt pricing
-  - list_receipts: View recent receipt history
-"""
+Your agent gets a `issue_receipt` tool. Before any significant action (API call, data access, purchase), it requests a signed receipt. The server:
 
-import os
-import json
-import urllib.request
-import urllib.error
-from datetime import datetime, timezone
+1. Validates the payload and rejects any PII (emails, SSNs)
+2. Canonicalizes the JSON (deterministic, byte-for-byte stable)
+3. Computes a SHA-256 hash
+4. Signs with Ed25519
+5. Atomically debits the workspace balance
+6. Returns the receipt with `receipt_id`, `canonical_hash`, `signature`, `key_id`
 
-# ============================================================
-# CONFIG
-# ============================================================
+Anyone can verify the receipt later using the public keys at `/.well-known/` — no API key, no trust in the server. Just math.
 
-OPENTERMS_API_URL = os.environ.get("OPENTERMS_API_URL", "https://openterms.com")
-OPENTERMS_API_KEY = os.environ.get("OPENTERMS_API_KEY", "")
+## Quick start
 
-# ============================================================
-# HTTP CLIENT (stdlib — no dependencies)
-# ============================================================
+### 1. Install
 
-def _api_call(method: str, path: str, body: dict = None, auth: bool = True) -> dict:
-    """Make an HTTP request to the Openterms API."""
-    url = f"{OPENTERMS_API_URL.rstrip('/')}{path}"
-    
-    headers = {"Content-Type": "application/json"}
-    if auth and OPENTERMS_API_KEY:
-        headers["Authorization"] = f"Bearer {OPENTERMS_API_KEY}"
-    
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        try:
-            return json.loads(error_body)
-        except json.JSONDecodeError:
-            return {"error": {"code": "HTTP_ERROR", "message": f"{e.code}: {error_body[:200]}"}}
-    except Exception as e:
-        return {"error": {"code": "CONNECTION_ERROR", "message": str(e)}}
+```bash
+git clone https://github.com/jstibal/openterms-mcp.git
+cd openterms-mcp
+pip install mcp httpx
+```
 
+### 2. Get an API key
 
-# ============================================================
-# MCP SERVER (using the `mcp` SDK)
-# ============================================================
+Open the console at **https://openterms.com/console**, connect with any wallet address, credit yourself some demo USDC, and create an API key.
 
-try:
-    from mcp.server.fastmcp import FastMCP
-    HAS_MCP_SDK = True
-except ImportError:
-    HAS_MCP_SDK = False
+Or do it from the command line:
 
-if HAS_MCP_SDK:
-    mcp = FastMCP(
-        "openterms",
-        description="Issue and verify cryptographic terms receipts for agent actions"
-    )
+```bash
+# Authenticate
+NONCE=$(curl -s -X POST https://openterms.com/v1/auth/nonce \
+  -H 'Content-Type: application/json' \
+  -d '{"wallet_address":"0xdemo"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['nonce'])")
 
-    @mcp.tool()
-    def issue_receipt(
-        agent_id: str,
-        action_type: str,
-        terms_url: str,
-        terms_hash: str,
-        action_context: dict = None,
-        idempotency_key: str = None,
-    ) -> str:
-        """
-        Issue a signed terms receipt before taking an action.
-        
-        Call this BEFORE performing any significant action (API call, data access,
-        purchase) to create a cryptographic record of consent.
-        
-        Args:
-            agent_id: Your agent identifier (e.g., "my-research-agent")
-            action_type: One of "api_call", "data_access", "purchase", "custom"
-            terms_url: URL of the terms being agreed to
-            terms_hash: SHA-256 hash of the terms document (64 hex chars)
-            action_context: Optional dict with action details (model, endpoint, etc.)
-            idempotency_key: Optional key to prevent duplicate receipts
-            
-        Returns:
-            JSON string with the signed receipt (includes receipt_id, signature, 
-            canonical_hash, key_id) or an error message.
-        """
-        payload = {
-            "agent_id": agent_id,
-            "action_type": action_type,
-            "terms_url": terms_url,
-            "terms_hash": terms_hash,
-            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
-            "pricing_version": "2025-01",
+TOKEN=$(curl -s -X POST https://openterms.com/v1/auth/siwe \
+  -H 'Content-Type: application/json' \
+  -d "{\"wallet_address\":\"0xdemo\",\"nonce\":\"$NONCE\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# Fund your workspace (10 USDC demo)
+curl -s -X POST https://openterms.com/console/deposit \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"amount": 10000000}'
+
+# Create an API key
+curl -s -X POST https://openterms.com/v1/keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"my-agent"}' | python3 -m json.tool
+```
+
+Save the `raw_key` from the response — it's shown once.
+
+### 3. Add to your MCP client
+
+#### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "openterms": {
+      "command": "python3",
+      "args": ["/full/path/to/openterms-mcp/openterms_mcp_server.py"],
+      "env": {
+        "OPENTERMS_API_URL": "https://openterms.com",
+        "OPENTERMS_API_KEY": "openterms_sk_YOUR_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+#### Cursor
+
+Add to `.cursor/mcp.json` in your project:
+
+```json
+{
+  "mcpServers": {
+    "openterms": {
+      "command": "python3",
+      "args": ["./openterms_mcp_server.py"],
+      "env": {
+        "OPENTERMS_API_URL": "https://openterms.com",
+        "OPENTERMS_API_KEY": "openterms_sk_YOUR_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+### 4. Tell your agent to use it
+
+> "Before making any external API call, use the `issue_receipt` tool to create a terms receipt. If the receipt fails, stop and notify me."
+
+## Tools
+
+| Tool | Auth | Description |
+|------|------|-------------|
+| `issue_receipt` | Yes | Issue a signed receipt before taking an action |
+| `verify_receipt` | No | Verify any receipt's cryptographic integrity |
+| `check_balance` | Yes | Check workspace USDC balance |
+| `get_pricing` | No | Get current per-receipt pricing |
+| `list_receipts` | Yes | View recent receipt history |
+
+## Demo
+
+Run the demo agent to see the full flow — discovery, pricing, receipt issuance, verification, and tamper detection:
+
+```bash
+export OPENTERMS_API_URL="https://openterms.com"
+python3 demo_agent.py
+```
+
+No API key needed — it auto-provisions a workspace.
+
+## CLI mode (no MCP SDK)
+
+Works without the `mcp` package as a standalone CLI:
+
+```bash
+export OPENTERMS_API_KEY="openterms_sk_YOUR_KEY_HERE"
+
+python3 openterms_mcp_server.py pricing
+python3 openterms_mcp_server.py balance
+python3 openterms_mcp_server.py issue my-agent api_call https://example.com/terms aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+python3 openterms_mcp_server.py list 5
+```
+
+## Direct API usage (no MCP)
+
+```python
+import requests
+
+receipt = requests.post(
+    "https://openterms.com/v1/receipts",
+    headers={"Authorization": f"Bearer {API_KEY}"},
+    json={
+        "agent_id": "my-agent",
+        "action_type": "api_call",
+        "terms_url": "https://openai.com/policies/terms-of-use",
+        "terms_hash": "a" * 64,
+        "timestamp": "2025-06-15T12:00:00.000Z",
+        "pricing_version": "2025-01",
+        "action_context": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "endpoint": "/v1/chat/completions"
         }
-        if action_context:
-            payload["action_context"] = action_context
-        
-        result = _api_call("POST", "/v1/receipts", payload)
-        return json.dumps(result, indent=2)
+    }
+).json()
 
-    @mcp.tool()
-    def verify_receipt(receipt_json: str) -> str:
-        """
-        Verify a receipt's cryptographic integrity.
-        
-        This is a public endpoint — no authentication required.
-        Paste the full receipt JSON to check if it's valid.
-        
-        Args:
-            receipt_json: Full receipt JSON string to verify
-            
-        Returns:
-            JSON with verification result (valid: true/false, details)
-        """
-        try:
-            receipt_data = json.loads(receipt_json)
-        except json.JSONDecodeError:
-            return json.dumps({"valid": False, "error": "Invalid JSON"})
-        
-        result = _api_call("POST", "/v1/receipts/verify", receipt_data, auth=False)
-        return json.dumps(result, indent=2)
+# Verify independently (public, no auth)
+verify = requests.post(
+    "https://openterms.com/v1/receipts/verify",
+    json=receipt
+).json()
+# {"valid": true, "hash_matches": true, "signature_valid": true}
+```
 
-    @mcp.tool()
-    def check_balance() -> str:
-        """
-        Check the current workspace balance.
-        
-        Returns balance in USDC (6 decimal places), deposit address,
-        and workspace ID.
-        """
-        result = _api_call("GET", "/v1/balance")
-        if "balance" in result:
-            result["balance_usdc"] = f"${result['balance'] / 1_000_000:.6f}"
-        return json.dumps(result, indent=2)
+## What's real
 
-    @mcp.tool()
-    def get_pricing() -> str:
-        """
-        Get current receipt pricing.
-        
-        Returns the cost per receipt in USDC minor units.
-        No authentication required.
-        """
-        result = _api_call("GET", "/v1/pricing", auth=False)
-        if "price_per_receipt" in result:
-            result["price_usdc"] = f"${result['price_per_receipt'] / 1_000_000:.6f}"
-        return json.dumps(result, indent=2)
+- **Ed25519 signatures** — real cryptography, not mocked
+- **Deterministic canonicalization** — byte-for-byte stable JSON
+- **PII detection** — rejects emails, SSNs, phone numbers before they hit the ledger
+- **Policy engine** — 7 rule types including spending caps and action whitelists
+- **Overdraft protection** — atomic balance deduction, can't go negative
+- **Key rotation** — old keys archived at `/.well-known/` so historical receipts stay verifiable
 
-    @mcp.tool()
-    def list_receipts(limit: int = 10, action_type: str = None) -> str:
-        """
-        List recent receipts for this workspace.
-        
-        Args:
-            limit: Number of receipts to return (max 100)
-            action_type: Optional filter: "api_call", "data_access", "purchase", "custom"
-            
-        Returns:
-            JSON array of recent receipts with pagination info.
-        """
-        params = f"?limit={min(limit, 100)}"
-        if action_type:
-            params += f"&action_type={action_type}"
-        result = _api_call("GET", f"/v1/receipts{params}")
-        return json.dumps(result, indent=2)
+## Links
 
+- **Landing page:** https://openterms.com
+- **Console:** https://openterms.com/console
+- **Agent manifest:** https://openterms.com/.well-known/openterms-agent.json
+- **Public keys:** https://openterms.com/.well-known/openterms-keys/
+- **OpenAPI spec:** https://openterms.com/openapi.json
+- **Verify endpoint:** `POST https://openterms.com/v1/receipts/verify`
 
-# ============================================================
-# STANDALONE MODE (no MCP SDK — works as a CLI tool)
-# ============================================================
+## License
 
-def _cli_mode():
-    """Fallback CLI mode when MCP SDK isn't installed."""
-    import sys
-    
-    usage = """
-Openterms CLI — Terms Receipt Management
-
-Usage:
-  python openterms_mcp_server.py issue <agent_id> <action_type> <terms_url> <terms_hash>
-  python openterms_mcp_server.py verify '<receipt_json>'
-  python openterms_mcp_server.py balance
-  python openterms_mcp_server.py pricing
-  python openterms_mcp_server.py list [limit]
-
-Environment:
-  OPENTERMS_API_URL  — API base URL (default: Manus deployment)
-  OPENTERMS_API_KEY  — Your openterms_* API key
-
-Examples:
-  export OPENTERMS_API_KEY="openterms_sk_your_key_here"
-  python openterms_mcp_server.py pricing
-  python openterms_mcp_server.py issue my-agent api_call https://example.com/terms a1b2c3d4...
-  python openterms_mcp_server.py balance
-"""
-    
-    if len(sys.argv) < 2:
-        print(usage)
-        return
-    
-    cmd = sys.argv[1]
-    
-    if cmd == "issue" and len(sys.argv) >= 6:
-        payload = {
-            "agent_id": sys.argv[2],
-            "action_type": sys.argv[3],
-            "terms_url": sys.argv[4],
-            "terms_hash": sys.argv[5],
-            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
-            "pricing_version": "2025-01",
-        }
-        result = _api_call("POST", "/v1/receipts", payload)
-        print(json.dumps(result, indent=2))
-    
-    elif cmd == "verify" and len(sys.argv) >= 3:
-        receipt_data = json.loads(sys.argv[2])
-        result = _api_call("POST", "/v1/receipts/verify", receipt_data, auth=False)
-        print(json.dumps(result, indent=2))
-    
-    elif cmd == "balance":
-        result = _api_call("GET", "/v1/balance")
-        print(json.dumps(result, indent=2))
-    
-    elif cmd == "pricing":
-        result = _api_call("GET", "/v1/pricing", auth=False)
-        print(json.dumps(result, indent=2))
-    
-    elif cmd == "list":
-        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-        result = _api_call("GET", f"/v1/receipts?limit={limit}")
-        print(json.dumps(result, indent=2))
-    
-    else:
-        print(usage)
-
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
-
-if __name__ == "__main__":
-    if HAS_MCP_SDK:
-        # Run as MCP server (stdio transport)
-        mcp.run()
-    else:
-        _cli_mode()
+MIT
