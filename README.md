@@ -137,6 +137,9 @@ python3 openterms_mcp_server.py pricing
 python3 openterms_mcp_server.py balance
 python3 openterms_mcp_server.py issue my-agent api_call https://example.com/terms aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 python3 openterms_mcp_server.py list 5
+python3 openterms_mcp_server.py policy
+python3 openterms_mcp_server.py simulate api_call https://example.com/terms
+python3 openterms_mcp_server.py decisions 10 deny
 ```
 
 ## Direct API usage (no MCP)
