@@ -111,6 +111,9 @@ Add to `.cursor/mcp.json` in your project:
 | `check_balance` | Yes | Check workspace USDC balance |
 | `get_pricing` | No | Get current per-receipt pricing |
 | `list_receipts` | Yes | View recent receipt history |
+| `get_policy` | Yes | Read active policy (guardrails) for this workspace |
+| `simulate_policy` | Yes | Test if an action would be allowed without issuing a receipt |
+| `policy_decisions` | Yes | View recent policy evaluation decisions (audit trail) |
 
 ## Demo
 
