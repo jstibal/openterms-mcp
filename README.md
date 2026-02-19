@@ -1,54 +1,40 @@
-# Openterms
-
-**Open source** cryptographic consent receipts + programmable guardrails + provider verification for AI agents.
+Openterms
+Open source cryptographic consent receipts + programmable guardrails + provider verification for AI agents.
 
 Your agent proves what it agreed to. Your policy controls what it's allowed to do. The API provider can verify both.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen.svg)](#tests)
+License Tests
 
-[Live Demo](https://openterms.com) · [Quickstart](#quickstart) · [Self-Host](#self-host) · [MCP Server](#mcp-server) · [Contributing](CONTRIBUTING.md) · [Open Receipt Spec](https://github.com/jstibal/ors-spec)
+Live Demo · Quickstart · Self-Host · MCP Server · Contributing · Open Receipt Spec
 
----
-
-## What It Does
-
+What It Does
 Openterms sits between your AI agent and the actions it takes. Three layers:
 
-**1. Receipts** — Before your agent calls an API, it gets an Ed25519-signed receipt. Canonical JSON (RFC 8785), SHA-256 hash, real cryptography. Anyone can verify it using public keys — no API key needed, no trust in the server required.
+1. Receipts — Before your agent calls an API, it gets an Ed25519-signed receipt. Canonical JSON (RFC 8785), SHA-256 hash, real cryptography. Anyone can verify it using public keys — no API key needed, no trust in the server required.
 
-**2. Policy Engine** — Daily spending caps, action type whitelists, escalation thresholds. The policy engine evaluates *before* the receipt is signed. Denied actions never get a receipt.
+2. Policy Engine — Daily spending caps, action type whitelists, escalation thresholds. The policy engine evaluates before the receipt is signed. Denied actions never get a receipt.
 
-**3. Provider Verification** — API providers register their terms URL and verify agent consent before serving requests. One public GET call. Both sides of the transaction trust the proof.
+3. Provider Verification — API providers register their terms URL and verify agent consent before serving requests. One public GET call. Both sides of the transaction trust the proof.
 
-## Quickstart
+Quickstart
+60 seconds to your first receipt:
 
-**60 seconds to your first receipt:**
-
-```bash
 git clone https://github.com/jstibal/openterms.git
 cd openterms
 pip install flask pyjwt cryptography pyyaml
 bash quickstart.sh
-```
-
 Or with Docker:
 
-```bash
 git clone https://github.com/jstibal/openterms.git
 cd openterms
 docker compose up --build
 # In another terminal:
 bash quickstart.sh
-```
+Receipt issuance is free — no wallet, no deposit, no payment required.
 
-Receipt issuance is **free** — no wallet, no deposit, no payment required.
-
-## Self-Host
-
+Self-Host
 Run your own Openterms instance:
 
-```bash
 # Option 1: Direct
 pip install flask pyjwt cryptography pyyaml
 python run.py
@@ -60,34 +46,26 @@ docker compose up --build
 # Option 3: Point MCP server at your instance
 export OPENTERMS_API_URL=http://localhost:5000
 python openterms_mcp_server.py
-```
-
 Everything runs locally. SQLite database, no external dependencies.
 
-## Hosted Service
+Hosted Service
+Don't want to self-host? Use the hosted instance at openterms.com — same open source code, managed for you.
 
-Don't want to self-host? Use the hosted instance at [openterms.com](https://openterms.com) — same open source code, managed for you.
-
-## MCP Server
-
+MCP Server
 10 tools for AI agents:
 
-| Tool | What it does |
-|------|-------------|
-| `issue_receipt` | Signed receipt before any action, with provider verification headers |
-| `verify_receipt` | Verify receipt cryptographic integrity (public) |
-| `verify_receipt_by_hash` | Look up and verify by canonical hash (public) |
-| `check_balance` | Workspace balance |
-| `get_pricing` | Per-receipt pricing |
-| `list_receipts` | Recent receipts |
-| `get_policy` | Active guardrails — call on startup |
-| `simulate_policy` | Pre-check: would this action be allowed? |
-| `policy_decisions` | Audit trail of every allow/deny/escalate |
-| `provider_activity` | Receipt stats for your API (provider auth) |
-
-### MCP Config
-
-```json
+Tool	What it does
+issue_receipt	Signed receipt before any action, with provider verification headers
+verify_receipt	Verify receipt cryptographic integrity (public)
+verify_receipt_by_hash	Look up and verify by canonical hash (public)
+check_balance	Workspace balance
+get_pricing	Per-receipt pricing
+list_receipts	Recent receipts
+get_policy	Active guardrails — call on startup
+simulate_policy	Pre-check: would this action be allowed?
+policy_decisions	Audit trail of every allow/deny/escalate
+provider_activity	Receipt stats for your API (provider auth)
+MCP Config
 {
   "mcpServers": {
     "openterms": {
@@ -100,11 +78,7 @@ Don't want to self-host? Use the hosted instance at [openterms.com](https://open
     }
   }
 }
-```
-
-## How Provider Verification Works
-
-```
+How Provider Verification Works
 Agent                    Openterms                  API Provider
   |                         |                           |
   |-- issue_receipt ------->|                           |
@@ -115,53 +89,34 @@ Agent                    Openterms                  API Provider
   |                         |<-- verify/{hash} ---------|
   |                         |-- receipt data ---------->|
   |<--------- response -----|---------------------------|
-```
-
-1. Agent issues receipt → gets `X-Openterms-Receipt` header
-2. Agent includes header in API call
-3. Provider calls `GET /v1/receipts/verify/{hash}` — public, no auth
-4. Valid → serve. Invalid → reject.
-
-## API Endpoints
-
-### Core
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/v1/receipts` | Bearer | Issue signed receipt |
-| POST | `/v1/receipts/verify` | None | Verify receipt |
-| GET | `/v1/receipts/verify/{hash}` | None | Verify by hash |
-| GET | `/v1/receipts` | Bearer | List receipts |
-| GET | `/.well-known/jwks.json` | None | Public signing keys |
-
-### Policy Engine
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/v1/policy` | Bearer | Active policy |
-| PUT | `/v1/policy` | Admin | Create/update policy |
-| POST | `/v1/policy/simulate` | Bearer | Test hypothetical action |
-| GET | `/v1/policy/decisions` | Bearer | Decision audit trail |
-
-### Provider Verification
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/v1/providers` | None | Register as provider |
-| POST | `/v1/providers/verify` | Provider | Verify domain |
-| GET | `/v1/provider/stats` | Provider | Receipt stats |
-| GET | `/v1/provider/receipts` | Provider | Recent receipts |
-
-## Tests
-
-```bash
+Agent issues receipt → gets X-Openterms-Receipt header
+Agent includes header in API call
+Provider calls GET /v1/receipts/verify/{hash} — public, no auth
+Valid → serve. Invalid → reject.
+API Endpoints
+Core
+Method	Path	Auth	Description
+POST	/v1/receipts	Bearer	Issue signed receipt
+POST	/v1/receipts/verify	None	Verify receipt
+GET	/v1/receipts/verify/{hash}	None	Verify by hash
+GET	/v1/receipts	Bearer	List receipts
+GET	/.well-known/jwks.json	None	Public signing keys
+Policy Engine
+Method	Path	Auth	Description
+GET	/v1/policy	Bearer	Active policy
+PUT	/v1/policy	Admin	Create/update policy
+POST	/v1/policy/simulate	Bearer	Test hypothetical action
+GET	/v1/policy/decisions	Bearer	Decision audit trail
+Provider Verification
+Method	Path	Auth	Description
+POST	/v1/providers	None	Register as provider
+POST	/v1/providers/verify	Provider	Verify domain
+GET	/v1/provider/stats	Provider	Receipt stats
+GET	/v1/provider/receipts	Provider	Recent receipts
+Tests
 make test
 # 120 tests passing (80 core + 40 provider verification)
-```
-
-## Architecture
-
-```
+Architecture
 openterms/
 ├── app.py                    # Flask API (1135 lines)
 ├── db.py                     # SQLite database (15 tables)
@@ -180,25 +135,18 @@ openterms/
 ├── docker-compose.yml
 ├── quickstart.sh
 └── .env.example
-```
+Roadmap
+Phase	Status	What it does
+MVP1	✅ Shipped	Signed receipts — record what happened
+MVP2	✅ Shipped	Policy engine — enforce what's allowed
+MVP3	✅ Shipped	Provider verification — both sides trust the proof
+ORS Spec	🔄 In progress	Open Receipt Specification — portable format
+Integrations	🔄 In progress	LangChain, CrewAI one-line callbacks
+MVP4	Planned	Receipt chaining, agent certification
+Contributing
+See CONTRIBUTING.md. We especially welcome framework integrations, language SDKs, and feedback on the Open Receipt Specification.
 
-## Roadmap
-
-| Phase | Status | What it does |
-|-------|--------|-------------|
-| MVP1 | ✅ Shipped | Signed receipts — record what happened |
-| MVP2 | ✅ Shipped | Policy engine — enforce what's allowed |
-| MVP3 | ✅ Shipped | Provider verification — both sides trust the proof |
-| ORS Spec | 🔄 In progress | Open Receipt Specification — portable format |
-| Integrations | 🔄 In progress | LangChain, CrewAI one-line callbacks |
-| MVP4 | Planned | Receipt chaining, agent certification |
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). We especially welcome framework integrations, language SDKs, and feedback on the [Open Receipt Specification](https://github.com/jstibal/ors-spec).
-
-## License
-
-Apache 2.0 — see [LICENSE](LICENSE).
+License
+Apache 2.0 — see LICENSE.
 
 Copyright 2026 Staticlabs Inc.
