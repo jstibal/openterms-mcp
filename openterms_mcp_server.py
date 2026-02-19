@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Openterms MCP Server — MVP 2
-Provides 8 MCP tools for AI agents:
+Openterms MCP Server — MVP 3
+Provides 10 MCP tools for AI agents:
   MVP1: issue_receipt, verify_receipt, check_balance, get_pricing, list_receipts
   MVP2: get_policy, simulate_policy, policy_decisions
+  MVP3: verify_receipt_by_hash, provider_activity
 Also works as a standalone CLI.
 """
 
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 
 API_URL = os.environ.get("OPENTERMS_API_URL", "https://openterms.com")
 API_KEY = os.environ.get("OPENTERMS_API_KEY", "")
+PROVIDER_KEY = os.environ.get("OPENTERMS_PROVIDER_KEY", "")
 
 TOOLS = [
     # --- MVP 1 Tools ---
@@ -114,6 +116,35 @@ TOOLS = [
             },
         },
     },
+    # --- MVP 3: Provider Verification Tools ---
+    {
+        "name": "verify_receipt_by_hash",
+        "description": (
+            "Verify a receipt by its canonical hash. Public — no API key needed. "
+            "Use this to check if an agent has a valid consent receipt before serving a request. "
+            "Returns receipt details and cryptographic verification result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["canonical_hash"],
+            "properties": {
+                "canonical_hash": {"type": "string", "description": "The canonical hash of the receipt to verify"},
+            },
+        },
+    },
+    {
+        "name": "provider_activity",
+        "description": (
+            "View receipt activity against your terms URL (requires provider API key via OPENTERMS_PROVIDER_KEY). "
+            "Shows stats, unique agents, and recent receipts for your API."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max receipts to return (default 10)"},
+            },
+        },
+    },
 ]
 
 
@@ -121,6 +152,13 @@ def _headers(auth=True):
     h = {"Content-Type": "application/json"}
     if auth and API_KEY:
         h["Authorization"] = f"Bearer {API_KEY}"
+    return h
+
+
+def _provider_headers():
+    h = {"Content-Type": "application/json"}
+    if PROVIDER_KEY:
+        h["Authorization"] = f"Bearer {PROVIDER_KEY}"
     return h
 
 
@@ -161,13 +199,17 @@ def handle_tool(name, arguments):
 
             if resp.status_code == 201:
                 receipt = resp.json()
+                headers_info = receipt.get('headers', {})
                 return (
                     f"✅ Receipt issued successfully\n"
                     f"  receipt_id: {receipt['receipt_id']}\n"
                     f"  canonical_hash: {receipt['canonical_hash']}\n"
                     f"  signature: {receipt['signature'][:32]}...\n"
                     f"  key_id: {receipt['key_id']}\n"
-                    f"  amount_charged: {receipt['amount_charged']} (USDC minor units)"
+                    f"  amount_charged: {receipt['amount_charged']} (USDC minor units)\n"
+                    f"  --- Headers for API provider ---\n"
+                    f"  X-Openterms-Receipt: {headers_info.get('X-Openterms-Receipt', 'n/a')}\n"
+                    f"  X-Openterms-Verify: {headers_info.get('X-Openterms-Verify', 'n/a')}"
                 )
             elif resp.status_code == 403:
                 err = resp.json().get("error", {})
@@ -322,6 +364,55 @@ def handle_tool(name, arguments):
                 return "\n".join(lines)
             return _format_error(resp)
 
+        # --- MVP 3: Provider Verification Tools ---
+        elif name == "verify_receipt_by_hash":
+            canonical_hash = arguments["canonical_hash"]
+            resp = client.get(f"/v1/receipts/verify/{canonical_hash}", headers=_headers(auth=False))
+            if resp.status_code == 200:
+                data = resp.json()
+                valid = data.get("valid", False)
+                status = "✅ VALID" if valid else "❌ INVALID"
+                verification = data.get("verification", {})
+                return (
+                    f"{status}\n"
+                    f"  receipt_id: {data.get('receipt_id', 'n/a')}\n"
+                    f"  agent_id: {data.get('agent_id', 'n/a')}\n"
+                    f"  action_type: {data.get('action_type', 'n/a')}\n"
+                    f"  terms_url: {data.get('terms_url', 'n/a')}\n"
+                    f"  amount_charged: {data.get('amount_charged', 0)}\n"
+                    f"  timestamp: {data.get('timestamp', 'n/a')}\n"
+                    f"  hash_matches: {verification.get('hash_matches', 'n/a')}\n"
+                    f"  signature_valid: {verification.get('signature_valid', 'n/a')}"
+                )
+            elif resp.status_code == 404:
+                return f"❌ No receipt found with hash: {canonical_hash}"
+            return _format_error(resp)
+
+        elif name == "provider_activity":
+            if not PROVIDER_KEY:
+                return "❌ OPENTERMS_PROVIDER_KEY not set. Register as a provider first."
+            # Get stats
+            resp = client.get("/v1/provider/stats", headers=_provider_headers())
+            if resp.status_code != 200:
+                return _format_error(resp)
+            stats = resp.json()
+            lines = [
+                f"📊 Provider Activity",
+                f"  Provider: {stats.get('provider_id', 'n/a')}",
+                f"  Verified: {'✅' if stats.get('verified') else '❌'}",
+                f"  Receipts (total): {stats.get('receipts_total', 0)}",
+                f"  Receipts (24h): {stats.get('receipts_24h', 0)}",
+                f"  Receipts (7d): {stats.get('receipts_7d', 0)}",
+                f"  Receipts (30d): {stats.get('receipts_30d', 0)}",
+                f"  Unique agents: {stats.get('unique_agents', 0)}",
+            ]
+            breakdown = stats.get('action_type_breakdown', {})
+            if breakdown:
+                lines.append("  Action types:")
+                for atype, count in breakdown.items():
+                    lines.append(f"    {atype}: {count}")
+            return "\n".join(lines)
+
         else:
             return f"Unknown tool: {name}"
 
@@ -375,9 +466,10 @@ def run_mcp_server():
 def run_cli():
     """Standalone CLI — works without the MCP SDK."""
     if len(sys.argv) < 2:
-        print("Openterms MCP Server — MVP 2")
+        print("Openterms MCP Server — MVP 3")
         print(f"API: {API_URL}")
         print(f"Key: {'***' + API_KEY[-8:] if API_KEY else '(not set)'}")
+        print(f"Provider Key: {'***' + PROVIDER_KEY[-8:] if PROVIDER_KEY else '(not set)'}")
         print()
         print("Usage:")
         print("  python3 openterms_mcp_server.py pricing")
@@ -387,6 +479,8 @@ def run_cli():
         print("  python3 openterms_mcp_server.py policy")
         print("  python3 openterms_mcp_server.py simulate <action_type> <terms_url>")
         print("  python3 openterms_mcp_server.py decisions [limit] [allow|deny|escalate]")
+        print("  python3 openterms_mcp_server.py verify-hash <canonical_hash>")
+        print("  python3 openterms_mcp_server.py provider-activity")
         return
 
     cmd = sys.argv[1]
@@ -415,6 +509,10 @@ def run_cli():
         if len(sys.argv) > 3:
             args["decision"] = sys.argv[3]
         print(handle_tool("policy_decisions", args))
+    elif cmd == "verify-hash" and len(sys.argv) >= 3:
+        print(handle_tool("verify_receipt_by_hash", {"canonical_hash": sys.argv[2]}))
+    elif cmd == "provider-activity":
+        print(handle_tool("provider_activity", {}))
     else:
         print(f"Unknown command: {cmd}")
 
