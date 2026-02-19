@@ -79,6 +79,7 @@ MCP Config
     }
   }
 }
+
 How Provider Verification Works
 Agent                    Openterms                  API Provider
   |                         |                           |
@@ -90,11 +91,14 @@ Agent                    Openterms                  API Provider
   |                         |<-- verify/{hash} ---------|
   |                         |-- receipt data ---------->|
   |<--------- response -----|---------------------------|
+  
 Agent issues receipt → gets X-Openterms-Receipt header
 Agent includes header in API call
 Provider calls GET /v1/receipts/verify/{hash} — public, no auth
 Valid → serve. Invalid → reject.
+
 API Endpoints
+
 Core
 Method	Path	Auth	Description
 POST	/v1/receipts	Bearer	Issue signed receipt
@@ -114,7 +118,9 @@ POST	/v1/providers	None	Register as provider
 POST	/v1/providers/verify	Provider	Verify domain
 GET	/v1/provider/stats	Provider	Receipt stats
 GET	/v1/provider/receipts	Provider	Recent receipts
+
 Tests
+
 make test
 # 120 tests passing (80 core + 40 provider verification)
 Architecture
@@ -136,15 +142,22 @@ openterms/
 ├── docker-compose.yml
 ├── quickstart.sh
 └── .env.example
+
 Roadmap
+
 Phase	Status	What it does
 MVP1	✅ Shipped	Signed receipts — record what happened
 MVP2	✅ Shipped	Policy engine — enforce what's allowed
 MVP3	✅ Shipped	Provider verification — both sides trust the proof
+
 ORS Spec	🔄 In progress	Open Receipt Specification — portable format
+
 Integrations	🔄 In progress	LangChain, CrewAI one-line callbacks
+
 MVP4	Planned	Receipt chaining, agent certification
+
 Contributing
+
 See CONTRIBUTING.md. We especially welcome framework integrations, language SDKs, and feedback on the Open Receipt Specification.
 
 License
