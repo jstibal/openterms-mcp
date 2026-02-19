@@ -1,4 +1,5 @@
 Openterms
+
 Open source cryptographic consent receipts + programmable guardrails + provider verification for AI agents.
 
 Your agent proves what it agreed to. Your policy controls what it's allowed to do. The API provider can verify both.
