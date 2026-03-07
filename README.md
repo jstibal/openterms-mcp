@@ -1,4 +1,4 @@
-Openterms
+# Openterms
 
 Open source cryptographic consent receipts + programmable guardrails + provider verification for AI agents.
 
@@ -8,7 +8,11 @@ License Tests
 
 Live Demo · Quickstart · Self-Host · MCP Server · Contributing · Open Receipt Spec
 
-What It Does
+<a href="https://glama.ai/mcp/servers/@jstibal/openterms-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@jstibal/openterms-mcp/badge" alt="Openterms-mcp MCP server" />
+</a>
+
+## What It Does
 Openterms sits between your AI agent and the actions it takes. Three layers:
 
 1. Receipts — Before your agent calls an API, it gets an Ed25519-signed receipt. Canonical JSON (RFC 8785), SHA-256 hash, real cryptography. Anyone can verify it using public keys — no API key needed, no trust in the server required.
@@ -17,7 +21,7 @@ Openterms sits between your AI agent and the actions it takes. Three layers:
 
 3. Provider Verification — API providers register their terms URL and verify agent consent before serving requests. One public GET call. Both sides of the transaction trust the proof.
 
-Quickstart
+## Quickstart
 60 seconds to your first receipt:
 
 git clone https://github.com/jstibal/openterms.git
@@ -33,7 +37,7 @@ docker compose up --build
 bash quickstart.sh
 Receipt issuance is free — no wallet, no deposit, no payment required.
 
-Self-Host
+## Self-Host
 Run your own Openterms instance:
 
 # Option 1: Direct
@@ -49,10 +53,10 @@ export OPENTERMS_API_URL=http://localhost:5000
 python openterms_mcp_server.py
 Everything runs locally. SQLite database, no external dependencies.
 
-Hosted Service
+## Hosted Service
 Don't want to self-host? Use the hosted instance at openterms.com — same open source code, managed for you.
 
-MCP Server
+## MCP Server
 10 tools for AI agents:
 
 Tool	What it does
@@ -80,7 +84,7 @@ MCP Config
   }
 }
 
-How Provider Verification Works
+## How Provider Verification Works
 Agent                    Openterms                  API Provider
   |                         |                           |
   |-- issue_receipt ------->|                           |
@@ -97,7 +101,7 @@ Agent includes header in API call
 Provider calls GET /v1/receipts/verify/{hash} — public, no auth
 Valid → serve. Invalid → reject.
 
-API Endpoints
+## API Endpoints
 
 Core
 Method	Path	Auth	Description
@@ -119,11 +123,11 @@ POST	/v1/providers/verify	Provider	Verify domain
 GET	/v1/provider/stats	Provider	Receipt stats
 GET	/v1/provider/receipts	Provider	Recent receipts
 
-Tests
+## Tests
 
 make test
 # 120 tests passing (80 core + 40 provider verification)
-Architecture
+## Architecture
 openterms/
 ├── app.py                    # Flask API (1135 lines)
 ├── db.py                     # SQLite database (15 tables)
@@ -143,7 +147,7 @@ openterms/
 ├── quickstart.sh
 └── .env.example
 
-Roadmap
+## Roadmap
 
 Phase	Status	What it does
 MVP1	✅ Shipped	Signed receipts — record what happened
@@ -156,11 +160,11 @@ Integrations	🔄 In progress	LangChain, CrewAI one-line callbacks
 
 MVP4	Planned	Receipt chaining, agent certification
 
-Contributing
+## Contributing
 
 See CONTRIBUTING.md. We especially welcome framework integrations, language SDKs, and feedback on the Open Receipt Specification.
 
-License
+## License
 Apache 2.0 — see LICENSE.
 
 Copyright 2026 Staticlabs Inc.
